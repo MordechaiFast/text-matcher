@@ -1,5 +1,3 @@
-# coding: utf-8
-
 import click
 from text_matcher.matcher import Text, Matcher
 import os
@@ -25,7 +23,7 @@ def getFiles(path):
         # Get list of all files in dir, recursively. 
         return glob.glob(path + "/**/*.txt", recursive=True)
     else:
-        raise click.ClickException("The path %s doesn't appear to be a file or directory" % path)
+        raise click.ClickException(f"The path {path} doesn't appear to be a file or directory")
 
 
 def checkLog(logfile, textpair):
@@ -33,16 +31,13 @@ def checkLog(logfile, textpair):
     Checks the log file to make sure we haven't already done a particular analysis. 
     Returns True if the pair is in the log already. 
     """
-    pairs = []
     logging.debug('Looking in the log for textpair:' % textpair)
     if not os.path.isfile(logfile):
         logging.debug('No log file found.')
         return None
 
     with open(logfile, newline='') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            pairs.append([row[0], row[1]])
+        pairs = [[row[0], row[1]] for row in csv.reader(f)]
     # logging.debug('Pairs already in log: %s' % pairs)
     return textpair in pairs
 
@@ -55,7 +50,6 @@ def createLog(logfile, columnLabels):
     header = ','.join(columnLabels) + '\n'
     with open(logfile, 'w') as f:
         f.write(header)
-        f.close
 
 
 @click.command()
@@ -87,20 +81,19 @@ def cli(text1, text2, threshold, cutoff, ngrams, logfile, verbose, stops, mindis
     if stops:
         logging.debug('Including stopwords in tokenizing.')
 
-    logging.debug('Comparing this/these text(s): %s' % str(texts1))
-    logging.debug('with this/these text(s): %s' % str(texts2))
+    logging.debug(f'Comparing this/these text(s): {texts1}')
+    logging.debug(f'with this/these text(s): {texts2}')
 
     pairs = list(itertools.product(texts1, texts2))
 
     numPairs = len(pairs)
 
-    logging.debug('Comparing %s pairs.' % numPairs)
+    logging.debug(f'Comparing {numPairs} pairs.')
     # logging.debug('List of pairs to compare: %s' % pairs)
 
     logging.debug('Loading files into memory.')
 
     texts = {}
-    prevTextObjs = {}
     for filename in texts1 + texts2:
         with open(filename, errors="ignore") as f:
             text = f.read()
@@ -109,38 +102,34 @@ def cli(text1, text2, threshold, cutoff, ngrams, logfile, verbose, stops, mindis
 
     logging.debug('Loading complete.')
 
-    for index, pair in enumerate(pairs):
+    prevTextObjs = {}
+    for index, pair in enumerate(pairs, 1):
         timeStart = os.times().elapsed
-        logging.debug('Now comparing pair %s of %s.' % (index + 1, numPairs))
-        logging.debug('Comparing %s with %s.' % (pair[0], pair[1]))
+        logging.debug(f'Now comparing pair {index} of {numPairs}.')
+        logging.debug(f'Comparing {pair[0]} with {pair[1]}.')
 
         # Make sure we haven't already done this pair. 
-        inLog = checkLog(logfile, [pair[0], pair[1]])
-
-        if inLog is None:
+        if checkLog(logfile, [pair[0], pair[1]]):
+            logging.debug('This pair is already in the log. Skipping.')
+            continue
+        else:
             # This means that there isn't a log file. Let's set one up.
+            logging.debug('No log file found. Setting one up.')
             # Set up columns and their labels. 
             columnLabels = ['Text A', 'Text B', 'Threshold', 'Cutoff', 'N-Grams', 'Num Matches', 'Text A Length',
                             'Text B Length', 'Locations in A', 'Locations in B']
-            logging.debug('No log file found. Setting one up.')
             createLog(logfile, columnLabels)
-
-        if inLog:
-            logging.debug('This pair is already in the log. Skipping.')
-            continue
 
         logging.debug('Processing texts.')
 
-        filenameA, filenameB = pair[0], pair[1]
-        textA, textB = texts[filenameA], texts[filenameB]
-
         # Put this in a dictionary so we don't have to process a file twice.
-        for filename in [filenameA, filenameB]:
+        for filename in pair:
             if filename not in prevTextObjs:
-                logging.debug('Processing text: %s' % filename)
+                logging.debug(f'Processing text: {filename}')
                 prevTextObjs[filename] = Text(texts[filename], filename)
 
         # Just more convenient naming. 
+        filenameA, filenameB = pair[0], pair[1]
         textObjA = prevTextObjs[filenameA]
         textObjB = prevTextObjs[filenameB]
 
@@ -155,17 +144,16 @@ def cli(text1, text2, threshold, cutoff, ngrams, logfile, verbose, stops, mindis
 
         timeEnd = os.times().elapsed
         timeElapsed = timeEnd - timeStart
-        logging.debug('Matching completed in %s seconds.' % timeElapsed)
+        logging.debug(f'Matching completed in {timeElapsed} seconds.')
 
         # Write to the log, but only if a match is found.
         if myMatch.numMatches > 0:
             logItems = [pair[0], pair[1], threshold, cutoff, ngrams, myMatch.numMatches, myMatch.textA.length,
                         myMatch.textB.length, str(myMatch.locationsA), str(myMatch.locationsB)]
-            logging.debug('Logging items: %s' % str(logItems))
-            line = ','.join(['"%s"' % item for item in logItems]) + '\n'
-            f = open(logfile, 'a')
-            f.write(line)
-            f.close()
+            logging.debug(f'Logging items: {logItems}')
+            line = ','.join(f'"{item}"' for item in logItems) + '\n'
+            with open(logfile, 'a') as f:
+                f.write(line)
 
 
 if __name__ == '__main__':
